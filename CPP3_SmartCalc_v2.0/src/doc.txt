@@ -1,0 +1,9 @@
+SmartCalc manual
+
+Use function buttons, digit buttons, x button to input your expression.
+Use button "=" to calculate your expression.
+Use button "Plot graph" to plot graph.
+You can choose x and y maximum with "Xmax" and "Ymax" spinboxes.
+You can calculate your expression with x, using "X" spinbox;
+Button "C" clears input.
+Button "⌫" deletes last symbol.
