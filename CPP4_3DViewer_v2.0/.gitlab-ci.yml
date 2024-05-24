@@ -1,0 +1,177 @@
+stages:
+  - style
+  - compile
+  - test
+  - valgrind
+  - deploy
+
+style-test:
+  stage: style
+  script:
+    - echo style-test
+    - cd src && make style_check
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+
+build-lib:
+  stage: compile
+  script:
+    - echo build-lib
+    - cd src && make model_lib
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+  needs: [style-test]
+  artifacts:
+    paths: [build]
+    expire_in: 30day
+  only: [develop, dev_cicd]
+
+unit-test:
+  stage: test
+  script:
+    - echo unit-test
+    - mkdir -p test_app
+    - cp -vr build/* src/
+    - cd src && make cicd_unit_test
+    - ls -lah
+    - cp -v ../tests/*.app ../test_app/
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+  needs: [build-lib]
+  artifacts:
+    when: always
+    paths: [test_app]
+    expire_in: 3day
+    reports:
+      junit: src/tests/report.xml
+  only: [develop, dev_cicd]
+
+coverage-report:
+  stage: valgrind
+  script:
+    - echo coverage-report
+    - cd src && make cicd_gcov_report
+    - ls -lah
+    - lcov --list tests_log/coverage.info
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+  needs: [unit-test]
+  artifacts:
+    when: always
+    paths: [src/report]
+    expire_in: 3day
+  only: [develop, dev_cicd]
+  coverage: '/Total.*/'
+
+valgrind-test:
+  stage: valgrind
+  script:
+    - echo valgrind-test
+    - cp -vr test_app/* tests
+    - cd src && make cicd_valgrind
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+  needs: [unit-test]
+  only: [develop, dev_cicd]
+
+ready_to_deploy:
+  stage: deploy
+  script: [echo ready to deploy]
+  after_script:
+    - >
+      if [ $CI_JOB_STATUS == 'success' ]; then
+        source ~/.bashrc
+        URL="https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
+        TEXT="Ready to Deploy%0A%0AProject:+$CI_PROJECT_NAME%0AURL:$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID/%0ABranch:+$CI_COMMIT_REF_SLUG"
+        curl -s --max-time 1 -d "chat_id=$TELEGRAM_CHAT_ID&disable_web_page_preview=1&text=$TEXT" $URL
+        curl -s --max-time 1 -d "chat_id=$TELEGRAM_CHAT_ID2&disable_web_page_preview=1&text=$TEXT" $URL > /dev/null
+      else
+        echo 'This will only run when job failed or is cancelled'
+      fi
+  tags: [3DViewer_v2]
+  needs: [valgrind-test]
+  only: [develop]
+
+make_doc:
+  stage: deploy
+  script:
+    - doxygen
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+  needs: [unit-test]
+  artifacts:
+    paths: [doc]
+    expire_in: 1day
+  only: [develop, dev_cicd]
+
+make_dist:
+  stage: deploy
+  script:
+    - echo make_dist
+    - cd src && make dist
+  after_script:
+    - bash tg_info.sh $CI_COMMIT_REF_SLUG $CI_JOB_NAME $CI_JOB_STATUS
+  tags: [3DViewer_v2]
+  needs: [valgrind-test]
+  artifacts:
+    paths: [dist]
+    expire_in: 30day
+  only: [develop, dev_cicd]
+
+if_fail_pipeline:
+  stage: .post
+  script:
+    - |
+      source ~/.bashrc
+      URL="https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
+      TEXT="Pipeline status: FAILURE%0A%0AProject:+$CI_PROJECT_NAME%0AURL:+$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID/%0ABranch:+$CI_COMMIT_REF_SLUG"
+      curl -s --max-time 1 -d "chat_id=$TELEGRAM_CHAT_ID&disable_web_page_preview=1&text=$TEXT" $URL > /dev/null
+      curl -s --max-time 1 -d "chat_id=$TELEGRAM_CHAT_ID2&disable_web_page_preview=1&text=$TEXT" $URL > /dev/null
+  tags: [3DViewer_v2]
+  when: on_failure
+
+
+# for export $CI_JOB_NAME to os
+# export $CI_PROJECT_NAME
+# then use it into bash script
+
+  # coverage: /Branches\s+:\s(\d+.?\d+)%/
+  # https://repos.21-school.ru/help/ci/yaml/README.md#coverage
+# 
+# delpoy:
+  # stage: deploy
+  # script:
+    # - hostname
+    # - bash src/deploy.sh
+  # after_script:
+    # - |
+      # source ~/.bashrc
+      # URL="https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
+      # TEXT="Deploy status: $CI_JOB_STATUS%0A%0AProject:+$CI_PROJECT_NAME%0AURL:+$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID/%0ABranch:+$CI_COMMIT_REF_SLUG"
+      # curl -s --max-time 1 -d "chat_id=$TELEGRAM_CHAT_ID&disable_web_page_preview=1&text=$TEXT" $URL > /dev/null
+  # tags: [Matrix+]
+  # needs: [valgrind-test]
+  # when: manual
+  # only: [develop]
+# 
+# build-gui:
+#  stage: build
+#  script:
+  #  - echo build-gui
+  #  - mkdir -p release
+  #  - cd src && make gui
+  #  - cp -v build/Matrix+.app ../release/
+#  tags: [Matrix+]
+#  needs: [style-test]
+#  artifacts:
+  #  paths: [release]
+  #  expire_in: 30day
+#  only: [develop, dev_cicd]
+# 
+#        curl -s --max-time 1 -d "chat_id=$TELEGRAM_USER_ID&disable_web_page_preview=1&text=$TEXT" $URL > /dev/null    for nidorina_cicd_bot
